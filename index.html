@@ -148,6 +148,7 @@ html, body { height: 100%; }
 .wm svg { width: 20px; height: 20px; flex: none; }
 .leaflet-div-icon.wmicon { background: none; border: 0; display: flex; justify-content: center; }
 .leaflet-container { font-family: var(--body); }
+@media (prefers-color-scheme: dark) { .basetiles { filter: invert(1) hue-rotate(180deg) brightness(.85) contrast(.9) saturate(.6); } }
 .leaflet-control-attribution { font-size: 10px; }
 .leaflet-bottom { bottom: var(--sheet-h, 0px); }
 .backbtn { flex: none; }
@@ -520,12 +521,12 @@ $("results").addEventListener("click", e => {
 $("locate").addEventListener("click", () => { $("spots").close(); locate(); });
 
 // --- map ---
+const OVERPASS = ["https://overpass-api.de/api/interpreter", "https://overpass.kumi.systems/api/interpreter"];
 const RADIUS_KM = 50, MAX_BEACHES = 25, MIN_GAP_KM = 2.5;
-const dark = matchMedia("(prefers-color-scheme: dark)").matches;
 const map = L.map("map", { zoomControl: false, attributionControl: true }).setView([-26.5, 134], 4);
-L.tileLayer(`https://{s}.basemaps.cartocdn.com/${dark ? "dark_all" : "light_all"}/{z}/{x}/{y}{r}.png`, {
-  maxZoom: 19, subdomains: "abcd",
-  attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
+L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+  maxZoom: 19, className: "basetiles",
+  attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
 }).addTo(map);
 
 let area = null;        // { lat, lon }
@@ -569,9 +570,16 @@ async function findBeaches(lat, lon) {
   const cached = store.get(key, null);
   if (cached && Date.now() - cached.at < 7 * 864e5) return cached.list;
   const q = `[out:json][timeout:25];nwr["natural"="beach"]["name"](around:${RADIUS_KM * 1000},${lat},${lon});out center tags;`;
-  const r = await fetch("https://overpass-api.de/api/interpreter", { method: "POST", body: "data=" + encodeURIComponent(q), headers: { "Content-Type": "application/x-www-form-urlencoded" } });
-  if (!r.ok) throw new Error("beach lookup returned " + r.status);
-  const els = (await r.json()).elements || [];
+  let els = null, lastErr;
+  for (const host of OVERPASS) {
+    try {
+      const r = await fetch(host, { method: "POST", body: "data=" + encodeURIComponent(q), headers: { "Content-Type": "application/x-www-form-urlencoded" } });
+      if (!r.ok) throw new Error("beach lookup returned " + r.status);
+      els = (await r.json()).elements || [];
+      break;
+    } catch (e) { lastErr = e; }
+  }
+  if (!els) throw lastErr;
   const byName = new Map();
   for (const el of els) {
     const bLat = el.lat ?? el.center?.lat, bLon = el.lon ?? el.center?.lon;

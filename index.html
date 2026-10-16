@@ -13,8 +13,11 @@
 <link rel="apple-touch-icon" href="icon-180.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Atkinson+Hyperlegible:wght@400;700&display=swap">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <style>
-/* Layout: one column instrument panel. Readout + compass on top, verdict, next window, 48h strip, settings. */
+/* Layout: home is a full-screen map of beach wind markers with a bottom card.
+   Tapping a beach opens the detail view: readout + compass, verdict, windows, 48h strip, settings. */
 :root {
   --bg: #eef3f4;
   --panel: #ffffff;
@@ -112,15 +115,63 @@ dialog::backdrop { background: rgb(0 0 0 / .45); }
 .primary { background: var(--accent); color: var(--panel); border: 0; border-radius: 8px; padding: 10px 14px; font-weight: 700; }
 .status { font-size: 13px; color: var(--muted); text-align: center; }
 .err { color: var(--nogo); }
+/* --- map view --- */
+html, body { height: 100%; }
+#mapView { position: fixed; inset: 0; }
+#map { position: absolute; inset: 0; background: var(--bg); }
+.topbar {
+  position: absolute; z-index: 500; left: 0; right: 0; top: 0; display: flex; gap: 8px; align-items: center;
+  padding: calc(env(safe-area-inset-top, 0px) + 10px) max(12px, env(safe-area-inset-right, 0px)) 0 max(12px, env(safe-area-inset-left, 0px));
+  pointer-events: none;
+}
+.topbar > * { pointer-events: auto; }
+.brand { font: 700 24px/1 var(--display); letter-spacing: .03em; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; margin-right: auto; }
+.brand span { color: var(--accent); }
+.areabtn { position: absolute; z-index: 500; left: 50%; transform: translateX(-50%); top: calc(env(safe-area-inset-top, 0px) + 62px); }
+.sheet {
+  position: absolute; z-index: 500; left: 0; right: 0; bottom: 0;
+  padding: 0 max(12px, env(safe-area-inset-right, 0px)) calc(env(safe-area-inset-bottom, 0px) + 12px) max(12px, env(safe-area-inset-left, 0px));
+}
+.card { max-width: 520px; margin: 0 auto; background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 14px 16px; box-shadow: 0 6px 24px rgb(0 0 0 / .18); display: grid; gap: 10px; }
+.card h2 { font: 700 26px/1.05 var(--display); margin: 0; }
+.card .meta { color: var(--muted); font-size: 14px; }
+.card .line { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.card .wind { font: 600 22px/1.1 var(--display); }
+.chip { font: 700 14px/1 var(--display); letter-spacing: .06em; text-transform: uppercase; padding: 6px 9px; border-radius: 6px; color: var(--panel); }
+.chip.go { background: var(--go); } .chip.maybe { background: var(--maybe); } .chip.nogo { background: var(--nogo); }
+.card .actions { display: flex; gap: 8px; }
+.card .actions .primary { flex: 1; }
+.wm { display: flex; align-items: center; gap: 2px; height: 28px; padding: 0 8px 0 4px; border-radius: 14px; border: 2px solid var(--panel);
+  font: 700 15px/1 var(--display); color: #fff; box-shadow: 0 2px 6px rgb(0 0 0 / .3); white-space: nowrap; width: max-content; }
+.wm.go { background: var(--go); } .wm.maybe { background: var(--maybe); } .wm.nogo { background: #6b7d84; }
+.wm.sel { outline: 3px solid var(--accent); outline-offset: 1px; }
+.wm svg { width: 20px; height: 20px; flex: none; }
+.leaflet-div-icon.wmicon { background: none; border: 0; display: flex; justify-content: center; }
+.leaflet-container { font-family: var(--body); }
+.leaflet-control-attribution { font-size: 10px; }
+.leaflet-bottom { bottom: var(--sheet-h, 0px); }
+.backbtn { flex: none; }
+
 @media (max-width: 400px) { .big { font-size: 68px; } .compass { width: 124px; height: 124px; } }
 @media (prefers-reduced-motion: no-preference) { #arrow { transition: transform .6s ease; } }
 </style>
 </head>
 <body>
-<div class="wrap">
+<section id="mapView" aria-label="Beaches near you">
+  <div id="map"></div>
+  <div class="topbar">
+    <div class="brand">Air<span>Vibes</span></div>
+    <button class="iconbtn" id="openSpots" type="button">Search</button>
+    <button class="iconbtn" id="locateMap" type="button" aria-label="Centre on my location">Locate</button>
+  </div>
+  <button class="iconbtn areabtn" id="searchArea" type="button" hidden>Check beaches here</button>
+  <div class="sheet" id="sheet"><div class="card" id="card" aria-live="polite"><p class="meta">Finding your location…</p></div></div>
+</section>
+
+<div class="wrap" id="detail" hidden>
   <header>
+    <button class="iconbtn backbtn" id="back" type="button">← Map</button>
     <h1 id="spotName">Loading…</h1>
-    <button class="iconbtn" id="openSpots" type="button">Spots</button>
   </header>
 
   <section class="panel readout" aria-label="Current wind">
@@ -221,8 +272,13 @@ let state = {
 };
 let data = null;
 
+let active = state.spots.find(s => s.id === state.current) || state.spots[0] || DEFAULT_SPOT;
+
 function save() { for (const k of ["spots","current","sport","min","maxGust","unit"]) store.set(k, state[k]); }
-function spot() { return state.spots.find(s => s.id === state.current) || state.spots[0] || DEFAULT_SPOT; }
+function spot() { return active; }
+function savedFor(id) { return state.spots.find(s => s.id === id); }
+// Beaches from the map are only stored once you customise them (e.g. mark directions).
+function persistActive() { if (!savedFor(active.id)) state.spots.push(active); save(); }
 
 // --- units ---
 const FACTOR = { kn: 1, kmh: 1.852, ms: 0.514444 };
@@ -237,9 +293,8 @@ function beaufort(kn) {
 }
 
 // --- rating ---
-function rate(speed, gust, deg) {
-  const s = spot();
-  const dirOk = !s.sectors.length || s.sectors.includes(sectorOf(deg));
+function rate(speed, gust, deg, sectors = spot().sectors) {
+  const dirOk = !sectors.length || sectors.includes(sectorOf(deg));
   if (gust > state.maxGust) return { level: "nogo", why: `Gusts ${fmt(gust)} ${UNIT_LABEL[state.unit]} are over your ${fmt(state.maxGust)} limit.` };
   if (!dirOk) return { level: "nogo", why: `Wind from ${dirName(deg)} is not one of your directions for this spot.` };
   if (speed >= state.min) {
@@ -408,33 +463,40 @@ $("compass").addEventListener("click", e => {
   const p = e.target.closest(".sector"); if (!p) return;
   const s = spot(), i = +p.dataset.i;
   s.sectors = s.sectors.includes(i) ? s.sectors.filter(x => x !== i) : [...s.sectors, i];
-  save(); render();
+  persistActive(); render();
 });
-$("clearDirs").addEventListener("click", () => { spot().sectors = []; save(); render(); });
+$("clearDirs").addEventListener("click", () => { spot().sectors = []; persistActive(); render(); });
 
-// --- spots ---
+// --- views ---
+function showMap() {
+  $("detail").hidden = true; $("mapView").hidden = false;
+  map.invalidateSize(); paintMarkers(); renderCard();
+}
+function openSpot(s) {
+  active = savedFor(s.id) || s;
+  state.current = active.id; save();
+  $("mapView").hidden = true; $("detail").hidden = false;
+  window.scrollTo(0, 0);
+  if (location.hash !== "#spot") history.pushState(null, "", "#spot");
+  load();
+}
+$("back").addEventListener("click", () => history.length > 1 && location.hash === "#spot" ? history.back() : showMap());
+window.addEventListener("popstate", () => { if (location.hash !== "#spot") showMap(); });
+
+// --- search & saved spots ---
 function renderSaved() {
-  $("saved").innerHTML = state.spots.map(s => `<li style="display:flex;gap:6px">
-    <button type="button" data-pick="${s.id}"><span>${esc(s.name)}</span><span class="label">${esc(s.region || "")}</span></button>
-    ${state.spots.length > 1 ? `<button type="button" class="x" data-del="${s.id}" aria-label="Remove ${esc(s.name)}">✕</button>` : ""}</li>`).join("");
+  $("saved").innerHTML = state.spots.length ? state.spots.map(s => `<li style="display:flex;gap:6px">
+    <button type="button" data-pick="${esc(s.id)}"><span>${esc(s.name)}</span><span class="label">${esc(s.region || "")}</span></button>
+    <button type="button" class="x" data-del="${esc(s.id)}" aria-label="Remove ${esc(s.name)}">✕</button></li>`).join("")
+    : `<li class="hint">Beaches you customise (e.g. mark good directions) appear here.</li>`;
 }
 function esc(s) { return String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
-function addSpot(s) {
-  const existing = state.spots.find(x => Math.abs(x.lat - s.lat) < 0.01 && Math.abs(x.lon - s.lon) < 0.01);
-  if (existing) state.current = existing.id;
-  else { state.spots.push(s); state.current = s.id; }
-  save(); $("spots").close(); load();
-}
 $("openSpots").addEventListener("click", () => { renderSaved(); $("results").innerHTML = ""; $("spots").showModal(); $("q").focus(); });
 $("closeSpots").addEventListener("click", () => $("spots").close());
 $("saved").addEventListener("click", e => {
   const pick = e.target.closest("[data-pick]"), del = e.target.closest("[data-del]");
-  if (pick) { state.current = pick.dataset.pick; save(); $("spots").close(); load(); }
-  if (del) {
-    state.spots = state.spots.filter(s => s.id !== del.dataset.del);
-    if (state.current === del.dataset.del) state.current = state.spots[0].id;
-    save(); renderSaved(); load();
-  }
+  if (pick) { $("spots").close(); openSpot(savedFor(pick.dataset.pick)); }
+  if (del) { state.spots = state.spots.filter(s => s.id !== del.dataset.del); save(); renderSaved(); }
 });
 let found = [];
 $("searchForm").addEventListener("submit", async e => {
@@ -452,22 +514,170 @@ $("searchForm").addEventListener("submit", async e => {
 $("results").addEventListener("click", e => {
   const b = e.target.closest("[data-f]"); if (!b) return;
   const f = found[+b.dataset.f];
-  addSpot({ id: "s" + Date.now(), name: f.name, region: f.admin1 || f.country || "", lat: f.latitude, lon: f.longitude, sectors: [] });
+  $("spots").close();
+  focusArea(f.latitude, f.longitude);
 });
-$("locate").addEventListener("click", () => {
-  if (!navigator.geolocation) return;
-  $("locate").textContent = "Locating…";
+$("locate").addEventListener("click", () => { $("spots").close(); locate(); });
+
+// --- map ---
+const RADIUS_KM = 50, MAX_BEACHES = 25, MIN_GAP_KM = 2.5;
+const dark = matchMedia("(prefers-color-scheme: dark)").matches;
+const map = L.map("map", { zoomControl: false, attributionControl: true }).setView([-26.5, 134], 4);
+L.tileLayer(`https://{s}.basemaps.cartocdn.com/${dark ? "dark_all" : "light_all"}/{z}/{x}/{y}{r}.png`, {
+  maxZoom: 19, subdomains: "abcd",
+  attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
+}).addTo(map);
+
+let area = null;        // { lat, lon }
+let beaches = [];       // { id, name, lat, lon, dist, speed, gust, deg }
+let selected = null;
+let layer = L.layerGroup().addTo(map);
+let ring = null, me = null;
+
+function km(aLat, aLon, bLat, bLon) {
+  const r = Math.PI / 180, dLat = (bLat - aLat) * r, dLon = (bLon - aLon) * r;
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(aLat * r) * Math.cos(bLat * r) * Math.sin(dLon / 2) ** 2;
+  return 12742 * Math.asin(Math.sqrt(h));
+}
+
+function card(html) { $("card").innerHTML = html; document.documentElement.style.setProperty("--sheet-h", $("sheet").offsetHeight + "px"); }
+
+function locate() {
+  if (!navigator.geolocation) return card(`<p class="meta">This browser can't share your location. Tap the map or use Search to pick an area.</p>`);
+  card(`<p class="meta">Finding your location…</p>`);
   navigator.geolocation.getCurrentPosition(
-    p => { $("locate").textContent = "Use my location"; addSpot({ id: "s" + Date.now(), name: "My location", region: p.coords.latitude.toFixed(3) + ", " + p.coords.longitude.toFixed(3), lat: +p.coords.latitude.toFixed(4), lon: +p.coords.longitude.toFixed(4), sectors: [] }); },
-    () => { $("locate").textContent = "Location blocked"; }
+    p => {
+      const { latitude: lat, longitude: lon } = p.coords;
+      if (me) me.remove();
+      me = L.circleMarker([lat, lon], { radius: 7, color: "#fff", weight: 2, fillColor: "#2b7de9", fillOpacity: 1 }).addTo(map);
+      focusArea(lat, lon);
+    },
+    () => card(`<p class="meta"><b>Location is off.</b> Tap anywhere on the map, or use Search, to check the beaches around that spot.</p>`),
+    { enableHighAccuracy: false, timeout: 10000, maximumAge: 300000 }
   );
+}
+
+function focusArea(lat, lon) {
+  if (ring) ring.remove();
+  ring = L.circle([lat, lon], { radius: RADIUS_KM * 1000, color: "#3fc1cf", weight: 1, fillOpacity: 0.04, interactive: false }).addTo(map);
+  map.flyToBounds(ring.getBounds(), { duration: 1.2, paddingBottomRight: [0, 120] });
+  loadArea(lat, lon);
+}
+
+async function findBeaches(lat, lon) {
+  const key = "beaches:" + lat.toFixed(1) + "," + lon.toFixed(1);
+  const cached = store.get(key, null);
+  if (cached && Date.now() - cached.at < 7 * 864e5) return cached.list;
+  const q = `[out:json][timeout:25];nwr["natural"="beach"]["name"](around:${RADIUS_KM * 1000},${lat},${lon});out center tags;`;
+  const r = await fetch("https://overpass-api.de/api/interpreter", { method: "POST", body: "data=" + encodeURIComponent(q), headers: { "Content-Type": "application/x-www-form-urlencoded" } });
+  if (!r.ok) throw new Error("beach lookup returned " + r.status);
+  const els = (await r.json()).elements || [];
+  const byName = new Map();
+  for (const el of els) {
+    const bLat = el.lat ?? el.center?.lat, bLon = el.lon ?? el.center?.lon;
+    if (bLat == null) continue;
+    const b = { id: "osm:" + el.type[0] + el.id, name: el.tags.name, lat: +bLat.toFixed(4), lon: +bLon.toFixed(4), dist: km(lat, lon, bLat, bLon) };
+    const prev = byName.get(b.name);
+    if (!prev || b.dist < prev.dist) byName.set(b.name, b);
+  }
+  const list = [];
+  for (const b of [...byName.values()].sort((a, z) => a.dist - z.dist)) {
+    if (list.length >= MAX_BEACHES) break;
+    if (list.every(o => km(o.lat, o.lon, b.lat, b.lon) >= MIN_GAP_KM)) list.push(b);
+  }
+  store.set(key, { at: Date.now(), list });
+  return list;
+}
+
+async function windFor(list) {
+  const url = "https://api.open-meteo.com/v1/forecast?latitude=" + list.map(b => b.lat).join(",") +
+    "&longitude=" + list.map(b => b.lon).join(",") +
+    "&current=wind_speed_10m,wind_direction_10m,wind_gusts_10m&wind_speed_unit=kn&timezone=auto";
+  const r = await fetch(url);
+  if (!r.ok) throw new Error("wind lookup returned " + r.status);
+  const j = await r.json();
+  const arr = Array.isArray(j) ? j : [j];
+  list.forEach((b, i) => { const c = arr[i]?.current; if (c) Object.assign(b, { speed: c.wind_speed_10m, gust: c.wind_gusts_10m, deg: c.wind_direction_10m }); });
+}
+
+let areaSeq = 0;
+async function loadArea(lat, lon) {
+  const seq = ++areaSeq;
+  area = { lat, lon }; selected = null; $("searchArea").hidden = true;
+  card(`<p class="meta">Finding beaches within ${RADIUS_KM} km…</p>`);
+  try {
+    const list = await findBeaches(lat, lon);
+    if (seq !== areaSeq) return;
+    if (!list.length) { beaches = []; paintMarkers(); return card(`<p class="meta">No named beaches within ${RADIUS_KM} km of here. Move the map to the coast and tap <b>Check beaches here</b>.</p>`); }
+    card(`<p class="meta">Checking wind at ${list.length} beaches…</p>`);
+    await windFor(list);
+    if (seq !== areaSeq) return;
+    beaches = list; paintMarkers(); renderCard();
+  } catch (e) {
+    if (seq === areaSeq) card(`<p class="meta err">Couldn't load beaches (${esc(e.message)}). Check your connection and try again.</p><button class="primary" type="button" onclick="loadArea(${lat},${lon})">Try again</button>`);
+  }
+}
+
+function beachRating(b) { return rate(b.speed, b.gust, b.deg, savedFor(b.id)?.sectors || []); }
+
+function arrowSvg(deg) {
+  return `<svg viewBox="-10 -10 20 20" aria-hidden="true"><g transform="rotate(${deg + 180})"><path d="M0 -8 L6 6 L0 3 L-6 6 Z" fill="#fff"/></g></svg>`;
+}
+function paintMarkers() {
+  layer.clearLayers();
+  for (const b of beaches) {
+    if (b.speed == null) continue;
+    const lv = beachRating(b).level;
+    const icon = L.divIcon({ className: "wmicon", iconSize: [60, 28], iconAnchor: [30, 14],
+      html: `<div class="wm ${lv}${selected === b ? " sel" : ""}" title="${esc(b.name)}">${arrowSvg(b.deg)}${fmt(b.speed)}</div>` });
+    L.marker([b.lat, b.lon], { icon, keyboard: true, title: b.name, riseOnHover: true, zIndexOffset: lv === "go" ? 1000 : lv === "maybe" ? 500 : 0 })
+      .on("click", () => { selected = b; paintMarkers(); renderCard(); })
+      .addTo(layer);
+  }
+}
+
+function windLine(b) { return `${fmt(b.speed)} ${UNIT_LABEL[state.unit]} gusting ${fmt(b.gust)} · from ${dirName(b.deg)}`; }
+function renderCard() {
+  if (!beaches.length) return;
+  const label = { go: "Go", maybe: "Marginal", nogo: "No go" };
+  if (selected) {
+    const v = beachRating(selected);
+    const b = selected;
+    card(`<div class="line"><h2>${esc(b.name)}</h2><span class="chip ${v.level}">${label[v.level]}</span></div>
+      <div class="wind num">${windLine(b)}</div>
+      <div class="meta">${b.dist.toFixed(0)} km away · ${esc(v.why)}</div>
+      <div class="actions"><button class="primary" type="button" id="openSel">Forecast & windows</button><button class="iconbtn" type="button" id="closeSel">Close</button></div>`);
+    $("openSel").onclick = () => openSpot({ id: b.id, name: b.name, region: b.dist.toFixed(0) + " km away", lat: b.lat, lon: b.lon, sectors: [] });
+    $("closeSel").onclick = () => { selected = null; paintMarkers(); renderCard(); };
+    return;
+  }
+  const order = { go: 0, maybe: 1, nogo: 2 };
+  const ranked = beaches.filter(b => b.speed != null).map(b => ({ b, v: beachRating(b) }))
+    .sort((x, y) => order[x.v.level] - order[y.v.level] || y.b.speed - x.b.speed);
+  const goCount = ranked.filter(r => r.v.level === "go").length;
+  const best = ranked[0];
+  card(`<div class="meta">${goCount ? `${goCount} of ${ranked.length} beaches are Go for ${esc($("sport").selectedOptions[0].text.toLowerCase())}` : `No beaches are Go right now (${ranked.length} checked)`}</div>
+    <div class="line"><h2>${esc(best.b.name)}</h2><span class="chip ${best.v.level}">${label[best.v.level]}</span></div>
+    <div class="wind num">${windLine(best.b)}</div>
+    <div class="actions"><button class="primary" type="button" id="openBest">Forecast & windows</button></div>`);
+  $("openBest").onclick = () => { const b = best.b; openSpot({ id: b.id, name: b.name, region: b.dist.toFixed(0) + " km away", lat: b.lat, lon: b.lon, sectors: [] }); };
+}
+
+map.on("click", e => { if (!beaches.length || !area) focusArea(e.latlng.lat, e.latlng.lng); else if (selected) { selected = null; paintMarkers(); renderCard(); } });
+map.on("moveend", () => {
+  if (!area) return;
+  const c = map.getCenter();
+  $("searchArea").hidden = km(area.lat, area.lon, c.lat, c.lng) < 20 || map.getZoom() < 8;
 });
+$("searchArea").addEventListener("click", () => { const c = map.getCenter(); focusArea(c.lat, c.lng); });
+$("locateMap").addEventListener("click", locate);
 
 // --- boot ---
 syncControls();
-load();
-setInterval(load, 10 * 60 * 1000);
-document.addEventListener("visibilitychange", () => { if (!document.hidden) load(); });
+if (location.hash === "#spot" && savedFor(state.current)) openSpot(active); else history.replaceState(null, "", location.pathname);
+locate();
+setInterval(() => { if (!$("detail").hidden) load(); else if (area) loadArea(area.lat, area.lon); }, 10 * 60 * 1000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden && !$("detail").hidden) load(); });
 </script>
 </body>
 </html>

@@ -1,0 +1,473 @@
+<!doctype html>
+<html lang="en-AU">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="AirVibes">
+<meta name="theme-color" content="#0f1d24">
+<title>AirVibes</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Atkinson+Hyperlegible:wght@400;700&display=swap">
+<style>
+/* Layout: one column instrument panel. Readout + compass on top, verdict, next window, 48h strip, settings. */
+:root {
+  --bg: #eef3f4;
+  --panel: #ffffff;
+  --ink: #12232b;
+  --muted: #5a6d74;
+  --line: #d3dee1;
+  --accent: #0b7f8c;
+  --go: #1f9d55;
+  --maybe: #d39016;
+  --nogo: #c4423a;
+  --go-soft: #d7f0e1;
+  --maybe-soft: #f8ebcc;
+  --nogo-soft: #f6dbd8;
+  --display: "Barlow Condensed", "Arial Narrow", system-ui, sans-serif;
+  --body: "Atkinson Hyperlegible", system-ui, -apple-system, "Segoe UI", sans-serif;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f1d24; --panel: #172a33; --ink: #e6f0f2; --muted: #93a8af; --line: #27404b;
+    --accent: #3fc1cf; --go: #3ccf7f; --maybe: #f0b13c; --nogo: #f06b61;
+    --go-soft: #173d2c; --maybe-soft: #43361a; --nogo-soft: #47231f;
+    color-scheme: dark;
+  }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  background: var(--bg); color: var(--ink); font: 16px/1.45 var(--body);
+  padding-top: env(safe-area-inset-top, 0px); padding-bottom: max(24px, env(safe-area-inset-bottom, 0px));
+}
+.wrap {
+  max-width: 560px; margin: 0 auto; display: grid; gap: 14px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 12px;
+}
+button, input, select { font: inherit; color: inherit; }
+button { cursor: pointer; }
+:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+.label { font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 700; }
+.num { font-family: var(--display); font-variant-numeric: tabular-nums; }
+
+header { display: flex; align-items: center; gap: 10px; }
+header h1 { font: 700 26px/1.1 var(--display); letter-spacing: .02em; margin: 0; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.iconbtn { border: 1px solid var(--line); background: var(--panel); border-radius: 10px; padding: 8px 12px; font-size: 14px; }
+
+.wrap > * { min-width: 0; }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 16px; }
+
+.readout { display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: center; }
+.big { font: 700 84px/0.9 var(--display); }
+.big small { font-size: 26px; font-weight: 600; color: var(--muted); margin-left: 4px; }
+.sub { display: flex; gap: 18px; flex-wrap: wrap; margin-top: 8px; }
+.sub div { display: grid; }
+.sub .v { font: 600 26px/1.1 var(--display); }
+.compass { width: 150px; height: 150px; }
+.compass text { font: 600 12px var(--display); fill: var(--muted); }
+.sector { cursor: pointer; }
+
+.verdict { display: flex; gap: 12px; align-items: center; border-radius: 14px; padding: 14px 16px; border: 1px solid transparent; }
+.verdict .pill { font: 700 22px/1 var(--display); letter-spacing: .06em; text-transform: uppercase; padding: 8px 12px; border-radius: 8px; color: var(--panel); flex: none; }
+.verdict p { margin: 0; min-width: 0; }
+.s-go { background: var(--go-soft); border-color: var(--go); } .s-go .pill { background: var(--go); }
+.s-maybe { background: var(--maybe-soft); border-color: var(--maybe); } .s-maybe .pill { background: var(--maybe); }
+.s-nogo { background: var(--nogo-soft); border-color: var(--nogo); } .s-nogo .pill { background: var(--nogo); }
+
+.windows { display: grid; gap: 8px; margin-top: 8px; }
+.win { display: flex; justify-content: space-between; gap: 10px; padding: 10px 12px; border-radius: 10px; background: var(--go-soft); }
+.win b { font-family: var(--display); font-size: 20px; font-weight: 600; }
+.win span { color: var(--muted); text-align: right; }
+.empty { color: var(--muted); margin: 8px 0 0; }
+
+.chartwrap { overflow-x: auto; margin-top: 8px; }
+#chart { display: block; width: 100%; min-width: 520px; height: auto; }
+#chart text { font: 600 11px var(--display); fill: var(--muted); }
+.legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 13px; color: var(--muted); margin-top: 6px; }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+
+.settings { display: grid; gap: 14px; }
+.row { display: flex; gap: 10px; flex-wrap: wrap; align-items: end; }
+.field { display: grid; gap: 4px; flex: 1 1 120px; }
+.field input, .field select { border: 1px solid var(--line); background: var(--bg); border-radius: 8px; padding: 9px 10px; width: 100%; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.seg button { border: 0; background: var(--panel); padding: 8px 12px; }
+.seg button[aria-pressed="true"] { background: var(--accent); color: var(--panel); font-weight: 700; }
+.hint { font-size: 13px; color: var(--muted); margin: 0; }
+
+dialog { border: 1px solid var(--line); border-radius: 14px; background: var(--panel); color: var(--ink); width: min(520px, calc(100% - 32px)); padding: 16px; }
+dialog::backdrop { background: rgb(0 0 0 / .45); }
+.search { display: flex; gap: 8px; }
+.search input { flex: 1; min-width: 0; border: 1px solid var(--line); background: var(--bg); border-radius: 8px; padding: 10px; }
+.results { list-style: none; padding: 0; margin: 12px 0 0; display: grid; gap: 6px; }
+.results button { width: 100%; text-align: left; border: 1px solid var(--line); background: var(--bg); border-radius: 10px; padding: 10px 12px; display: flex; justify-content: space-between; gap: 8px; }
+.results .x { flex: none; width: auto; }
+.primary { background: var(--accent); color: var(--panel); border: 0; border-radius: 8px; padding: 10px 14px; font-weight: 700; }
+.status { font-size: 13px; color: var(--muted); text-align: center; }
+.err { color: var(--nogo); }
+@media (max-width: 400px) { .big { font-size: 68px; } .compass { width: 124px; height: 124px; } }
+@media (prefers-reduced-motion: no-preference) { #arrow { transition: transform .6s ease; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1 id="spotName">Loading…</h1>
+    <button class="iconbtn" id="openSpots" type="button">Spots</button>
+  </header>
+
+  <section class="panel readout" aria-label="Current wind">
+    <div>
+      <div class="label">Wind now</div>
+      <div class="big num"><span id="speed">--</span><small id="unitLbl">kn</small></div>
+      <div class="sub">
+        <div><span class="label">Gusts</span><span class="v num" id="gust">--</span></div>
+        <div><span class="label">From</span><span class="v num" id="dir">--</span></div>
+        <div><span class="label">Beaufort</span><span class="v num" id="bft">--</span></div>
+      </div>
+    </div>
+    <svg class="compass" id="compass" viewBox="-80 -80 160 160" role="img" aria-label="Wind direction compass. Tap sectors to mark good directions."></svg>
+  </section>
+
+  <section class="verdict" id="verdict" aria-live="polite">
+    <span class="pill" id="pill">--</span>
+    <p id="reason">Fetching forecast…</p>
+  </section>
+
+  <section class="panel" aria-label="Good windows">
+    <div class="label">Rideable windows · next 3 days</div>
+    <div class="windows" id="windows"></div>
+  </section>
+
+  <section class="panel" aria-label="Hourly forecast">
+    <div class="label">Next 48 hours</div>
+    <div class="chartwrap"><svg id="chart" viewBox="0 0 560 200" role="img" aria-label="Hourly wind and gust bars"></svg></div>
+    <div class="legend">
+      <span><i style="background:var(--go)"></i>Go</span>
+      <span><i style="background:var(--maybe)"></i>Marginal</span>
+      <span><i style="background:var(--line)"></i>No go</span>
+      <span><i style="background:var(--ink);height:2px"></i>Gust</span>
+    </div>
+  </section>
+
+  <section class="panel settings" aria-label="Your limits">
+    <div class="label">Your limits</div>
+    <div class="row">
+      <label class="field"><span class="label">Sport</span>
+        <select id="sport">
+          <option value="kite">Kitesurf</option>
+          <option value="wing">Wing foil</option>
+          <option value="windsurf">Windsurf</option>
+          <option value="sail">Dinghy sailing</option>
+          <option value="custom">Custom</option>
+        </select>
+      </label>
+      <label class="field"><span class="label">Min wind (kn)</span><input id="minWind" type="number" inputmode="numeric" min="0" max="60"></label>
+      <label class="field"><span class="label">Max gust (kn)</span><input id="maxGust" type="number" inputmode="numeric" min="0" max="80"></label>
+    </div>
+    <div class="row">
+      <div class="field" style="flex:0 0 auto"><span class="label">Units</span>
+        <div class="seg" id="units" role="group" aria-label="Units">
+          <button type="button" data-u="kn">kn</button><button type="button" data-u="kmh">km/h</button><button type="button" data-u="ms">m/s</button>
+        </div>
+      </div>
+      <button class="iconbtn" id="clearDirs" type="button">Clear directions</button>
+    </div>
+    <p class="hint">Tap the compass to mark the directions that work at this spot (e.g. cross-onshore). No sectors marked means any direction is fine.</p>
+  </section>
+
+  <p class="status" id="status"></p>
+</div>
+
+<dialog id="spots">
+  <form class="search" id="searchForm">
+    <input id="q" type="search" placeholder="Search a beach or town" autocomplete="off" aria-label="Search location">
+    <button class="primary" type="submit">Search</button>
+  </form>
+  <ul class="results" id="results"></ul>
+  <div class="label" style="margin-top:14px">Saved spots</div>
+  <ul class="results" id="saved"></ul>
+  <div class="row" style="margin-top:14px; justify-content:space-between">
+    <button class="iconbtn" id="locate" type="button">Use my location</button>
+    <button class="iconbtn" id="closeSpots" type="button">Close</button>
+  </div>
+</dialog>
+
+<script>
+const PRESETS = { kite: [12, 30], wing: [12, 28], windsurf: [15, 35], sail: [6, 20] };
+const DIRS = ["N","NNE","NE","ENE","E","ESE","SE","SSE","S","SSW","SW","WSW","W","WNW","NW","NNW"];
+const DEFAULT_SPOT = { id: "gc", name: "Gold Coast", region: "Queensland", lat: -28.0167, lon: 153.4, sectors: [] };
+
+const $ = id => document.getElementById(id);
+const store = {
+  get(k, d) { try { const v = localStorage.getItem("wc:" + k); return v ? JSON.parse(v) : d; } catch { return d; } },
+  set(k, v) { try { localStorage.setItem("wc:" + k, JSON.stringify(v)); } catch {} }
+};
+
+let state = {
+  spots: store.get("spots", [DEFAULT_SPOT]),
+  current: store.get("current", "gc"),
+  sport: store.get("sport", "kite"),
+  min: store.get("min", 12),
+  maxGust: store.get("maxGust", 30),
+  unit: store.get("unit", "kn"),
+};
+let data = null;
+
+function save() { for (const k of ["spots","current","sport","min","maxGust","unit"]) store.set(k, state[k]); }
+function spot() { return state.spots.find(s => s.id === state.current) || state.spots[0] || DEFAULT_SPOT; }
+
+// --- units ---
+const FACTOR = { kn: 1, kmh: 1.852, ms: 0.514444 };
+const UNIT_LABEL = { kn: "kn", kmh: "km/h", ms: "m/s" };
+const fmt = kn => Math.round(kn * FACTOR[state.unit]);
+const dirName = deg => DIRS[Math.round(deg / 22.5) % 16];
+const sectorOf = deg => Math.round(deg / 22.5) % 16;
+function beaufort(kn) {
+  const lim = [1, 4, 7, 11, 17, 22, 28, 34, 41, 48, 56, 64];
+  const i = lim.findIndex(l => kn < l);
+  return i === -1 ? 12 : i;
+}
+
+// --- rating ---
+function rate(speed, gust, deg) {
+  const s = spot();
+  const dirOk = !s.sectors.length || s.sectors.includes(sectorOf(deg));
+  if (gust > state.maxGust) return { level: "nogo", why: `Gusts ${fmt(gust)} ${UNIT_LABEL[state.unit]} are over your ${fmt(state.maxGust)} limit.` };
+  if (!dirOk) return { level: "nogo", why: `Wind from ${dirName(deg)} is not one of your directions for this spot.` };
+  if (speed >= state.min) {
+    if (gust - speed > 12) return { level: "maybe", why: `Enough wind, but gusty: ${fmt(speed)} gusting ${fmt(gust)}.` };
+    return { level: "go", why: `${fmt(speed)} ${UNIT_LABEL[state.unit]} from ${dirName(deg)}, gusts to ${fmt(gust)}.` };
+  }
+  if (speed >= state.min - 2) return { level: "maybe", why: `Just under your minimum: ${fmt(speed)} of ${fmt(state.min)} needed.` };
+  return { level: "nogo", why: `Too light: ${fmt(speed)} ${UNIT_LABEL[state.unit]}, you need ${fmt(state.min)}.` };
+}
+
+// --- data ---
+async function load() {
+  const s = spot();
+  $("spotName").textContent = s.name;
+  $("status").textContent = "Updating…";
+  const url = "https://api.open-meteo.com/v1/forecast?latitude=" + s.lat + "&longitude=" + s.lon +
+    "&current=wind_speed_10m,wind_direction_10m,wind_gusts_10m" +
+    "&hourly=wind_speed_10m,wind_direction_10m,wind_gusts_10m" +
+    "&wind_speed_unit=kn&timezone=auto&forecast_days=3";
+  try {
+    const r = await fetch(url);
+    if (!r.ok) throw new Error("Forecast service returned " + r.status);
+    data = await r.json();
+    render();
+    $("status").textContent = "Updated " + new Date().toLocaleTimeString("en-AU", { hour: "numeric", minute: "2-digit" }) + " · Open-Meteo";
+    $("status").classList.remove("err");
+  } catch (e) {
+    $("status").textContent = "Couldn't load the forecast. Check your connection and pull to refresh. (" + e.message + ")";
+    $("status").classList.add("err");
+  }
+}
+
+function hours() {
+  const h = data.hourly;
+  const nowKey = data.current.time.slice(0, 13);
+  let start = h.time.findIndex(t => t.slice(0, 13) >= nowKey);
+  if (start < 0) start = 0;
+  return h.time.map((t, i) => ({ t, speed: h.wind_speed_10m[i], gust: h.wind_gusts_10m[i], deg: h.wind_direction_10m[i] })).slice(start);
+}
+
+// --- render ---
+function render() {
+  if (!data) return;
+  const c = data.current;
+  $("unitLbl").textContent = UNIT_LABEL[state.unit];
+  $("speed").textContent = fmt(c.wind_speed_10m);
+  $("gust").textContent = fmt(c.wind_gusts_10m);
+  $("dir").textContent = dirName(c.wind_direction_10m) + " " + Math.round(c.wind_direction_10m) + "°";
+  $("bft").textContent = "F" + beaufort(c.wind_speed_10m);
+  const v = rate(c.wind_speed_10m, c.wind_gusts_10m, c.wind_direction_10m);
+  $("verdict").className = "verdict s-" + v.level;
+  $("pill").textContent = { go: "Go", maybe: "Marginal", nogo: "No go" }[v.level];
+  $("reason").textContent = v.why;
+  drawCompass(c.wind_direction_10m);
+  drawChart(hours().slice(0, 48));
+  drawWindows(hours());
+}
+
+function drawCompass(deg) {
+  const s = spot();
+  let out = "";
+  for (let i = 0; i < 16; i++) {
+    const a0 = (i * 22.5 - 11.25 - 90) * Math.PI / 180, a1 = (i * 22.5 + 11.25 - 90) * Math.PI / 180;
+    const R = 70, r = 46;
+    const p = (rad, a) => (rad * Math.cos(a)).toFixed(2) + " " + (rad * Math.sin(a)).toFixed(2);
+    const on = s.sectors.includes(i);
+    out += `<path class="sector" data-i="${i}" d="M${p(r,a0)} L${p(R,a0)} A${R} ${R} 0 0 1 ${p(R,a1)} L${p(r,a1)} A${r} ${r} 0 0 0 ${p(r,a0)}Z"
+      fill="${on ? "var(--go-soft)" : "var(--bg)"}" stroke="${on ? "var(--go)" : "var(--line)"}" stroke-width="1"><title>${DIRS[i]}</title></path>`;
+  }
+  for (const [lbl, i] of [["N",0],["E",4],["S",8],["W",12]]) {
+    const a = (i * 22.5 - 90) * Math.PI / 180;
+    out += `<text x="${(58 * Math.cos(a)).toFixed(1)}" y="${(58 * Math.sin(a) + 4).toFixed(1)}" text-anchor="middle" pointer-events="none">${lbl}</text>`;
+  }
+  // Arrow shows where the wind blows towards, tail at the "from" side.
+  out += `<g id="arrow" style="transform: rotate(${deg + 180}deg)" pointer-events="none">
+    <line x1="0" y1="36" x2="0" y2="-26" stroke="var(--accent)" stroke-width="5" stroke-linecap="round"/>
+    <path d="M0 -40 L11 -20 L-11 -20 Z" fill="var(--accent)"/></g>
+    <circle r="4" fill="var(--ink)" pointer-events="none"/>`;
+  $("compass").innerHTML = out;
+}
+
+function drawChart(hs) {
+  const W = 560, H = 200, top = 14, bottom = 156, left = 26;
+  const max = Math.max(state.maxGust, ...hs.map(h => h.gust)) * 1.08;
+  const y = kn => bottom - (kn / max) * (bottom - top);
+  const bw = (W - left) / hs.length;
+  const col = { go: "var(--go)", maybe: "var(--maybe)", nogo: "var(--line)" };
+  let out = "";
+  const step = max > 40 ? 10 : 5;
+  for (let k = 0; k <= max; k += step) {
+    out += `<line x1="${left}" x2="${W}" y1="${y(k)}" y2="${y(k)}" stroke="var(--line)" stroke-width="0.5"/>
+            <text x="${left - 4}" y="${y(k) + 4}" text-anchor="end">${fmt(k)}</text>`;
+  }
+  out += `<line x1="${left}" x2="${W}" y1="${y(state.min)}" y2="${y(state.min)}" stroke="var(--go)" stroke-dasharray="4 3"/>`;
+  hs.forEach((h, i) => {
+    const x = left + i * bw, lv = rate(h.speed, h.gust, h.deg).level;
+    out += `<rect x="${(x + 1).toFixed(1)}" y="${y(h.speed).toFixed(1)}" width="${(bw - 2).toFixed(1)}" height="${(bottom - y(h.speed)).toFixed(1)}" rx="1.5" fill="${col[lv]}"><title>${h.t.slice(11,16)} ${fmt(h.speed)} g${fmt(h.gust)} ${dirName(h.deg)}</title></rect>`;
+    out += `<line x1="${(x + 1).toFixed(1)}" x2="${(x + bw - 1).toFixed(1)}" y1="${y(h.gust).toFixed(1)}" y2="${y(h.gust).toFixed(1)}" stroke="var(--ink)" stroke-width="2"/>`;
+    const hr = +h.t.slice(11, 13);
+    if (hr % 3 === 0) {
+      const cx = x + bw / 2;
+      out += `<g transform="translate(${cx.toFixed(1)} 168) rotate(${h.deg + 180})"><path d="M0 -6 L4 3 L0 1 L-4 3 Z" fill="var(--muted)"/></g>`;
+      out += `<text x="${cx.toFixed(1)}" y="186" text-anchor="middle">${hr === 0 ? dayName(h.t) : hr}</text>`;
+    }
+  });
+  $("chart").innerHTML = out;
+}
+
+function dayName(t) {
+  return new Date(t.slice(0, 10) + "T12:00").toLocaleDateString("en-AU", { weekday: "short" });
+}
+function hourName(t) {
+  const h = +t.slice(11, 13);
+  return (h % 12 || 12) + (h < 12 ? "am" : "pm");
+}
+
+function drawWindows(hs) {
+  const wins = [];
+  let cur = null;
+  hs.forEach(h => {
+    const hr = +h.t.slice(11, 13);
+    const ok = rate(h.speed, h.gust, h.deg).level === "go" && hr >= 6 && hr <= 18; // daylight-ish only
+    if (ok) {
+      if (!cur) cur = { from: h.t, to: h.t, hs: [] };
+      cur.to = h.t; cur.hs.push(h);
+    } else if (cur) { wins.push(cur); cur = null; }
+  });
+  if (cur) wins.push(cur);
+  const good = wins.filter(w => w.hs.length >= 2);
+  if (!good.length) {
+    $("windows").innerHTML = `<p class="empty">No rideable daylight windows of 2+ hours in the forecast. Try loosening your limits or directions.</p>`;
+    return;
+  }
+  $("windows").innerHTML = good.map(w => {
+    const sp = w.hs.map(h => h.speed), avgDeg = w.hs[Math.floor(w.hs.length / 2)].deg;
+    const end = hourName(w.to.slice(0, 11) + String(+w.to.slice(11, 13) + 1).padStart(2, "0"));
+    return `<div class="win"><b>${dayName(w.from)} ${hourName(w.from)}–${end}</b>
+      <span>${fmt(Math.min(...sp))}–${fmt(Math.max(...sp))} ${UNIT_LABEL[state.unit]} ${dirName(avgDeg)}</span></div>`;
+  }).join("");
+}
+
+// --- settings ---
+function syncControls() {
+  $("sport").value = state.sport;
+  $("minWind").value = state.min;
+  $("maxGust").value = state.maxGust;
+  document.querySelectorAll("#units button").forEach(b => b.setAttribute("aria-pressed", b.dataset.u === state.unit));
+}
+$("sport").addEventListener("change", e => {
+  state.sport = e.target.value;
+  if (PRESETS[state.sport]) [state.min, state.maxGust] = PRESETS[state.sport];
+  syncControls(); save(); render();
+});
+for (const id of ["minWind", "maxGust"]) $(id).addEventListener("input", () => {
+  const v = +$(id).value;
+  if (!Number.isFinite(v) || $(id).value === "") return;
+  state[id === "minWind" ? "min" : "maxGust"] = v;
+  state.sport = "custom"; $("sport").value = "custom";
+  save(); render();
+});
+$("units").addEventListener("click", e => {
+  const u = e.target.dataset?.u; if (!u) return;
+  state.unit = u; syncControls(); save(); render();
+});
+$("compass").addEventListener("click", e => {
+  const p = e.target.closest(".sector"); if (!p) return;
+  const s = spot(), i = +p.dataset.i;
+  s.sectors = s.sectors.includes(i) ? s.sectors.filter(x => x !== i) : [...s.sectors, i];
+  save(); render();
+});
+$("clearDirs").addEventListener("click", () => { spot().sectors = []; save(); render(); });
+
+// --- spots ---
+function renderSaved() {
+  $("saved").innerHTML = state.spots.map(s => `<li style="display:flex;gap:6px">
+    <button type="button" data-pick="${s.id}"><span>${esc(s.name)}</span><span class="label">${esc(s.region || "")}</span></button>
+    ${state.spots.length > 1 ? `<button type="button" class="x" data-del="${s.id}" aria-label="Remove ${esc(s.name)}">✕</button>` : ""}</li>`).join("");
+}
+function esc(s) { return String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
+function addSpot(s) {
+  const existing = state.spots.find(x => Math.abs(x.lat - s.lat) < 0.01 && Math.abs(x.lon - s.lon) < 0.01);
+  if (existing) state.current = existing.id;
+  else { state.spots.push(s); state.current = s.id; }
+  save(); $("spots").close(); load();
+}
+$("openSpots").addEventListener("click", () => { renderSaved(); $("results").innerHTML = ""; $("spots").showModal(); $("q").focus(); });
+$("closeSpots").addEventListener("click", () => $("spots").close());
+$("saved").addEventListener("click", e => {
+  const pick = e.target.closest("[data-pick]"), del = e.target.closest("[data-del]");
+  if (pick) { state.current = pick.dataset.pick; save(); $("spots").close(); load(); }
+  if (del) {
+    state.spots = state.spots.filter(s => s.id !== del.dataset.del);
+    if (state.current === del.dataset.del) state.current = state.spots[0].id;
+    save(); renderSaved(); load();
+  }
+});
+let found = [];
+$("searchForm").addEventListener("submit", async e => {
+  e.preventDefault();
+  const q = $("q").value.trim(); if (!q) return;
+  $("results").innerHTML = `<li class="hint">Searching…</li>`;
+  try {
+    const r = await fetch("https://geocoding-api.open-meteo.com/v1/search?count=8&language=en&format=json&name=" + encodeURIComponent(q));
+    found = (await r.json()).results || [];
+    $("results").innerHTML = found.length ? found.map((f, i) => `<li><button type="button" data-f="${i}">
+      <span>${esc(f.name)}</span><span class="label">${esc([f.admin1, f.country_code].filter(Boolean).join(", "))}</span></button></li>`).join("")
+      : `<li class="hint">No places found for “${esc(q)}”. Try the nearest town.</li>`;
+  } catch { $("results").innerHTML = `<li class="hint err">Search failed. Check your connection.</li>`; }
+});
+$("results").addEventListener("click", e => {
+  const b = e.target.closest("[data-f]"); if (!b) return;
+  const f = found[+b.dataset.f];
+  addSpot({ id: "s" + Date.now(), name: f.name, region: f.admin1 || f.country || "", lat: f.latitude, lon: f.longitude, sectors: [] });
+});
+$("locate").addEventListener("click", () => {
+  if (!navigator.geolocation) return;
+  $("locate").textContent = "Locating…";
+  navigator.geolocation.getCurrentPosition(
+    p => { $("locate").textContent = "Use my location"; addSpot({ id: "s" + Date.now(), name: "My location", region: p.coords.latitude.toFixed(3) + ", " + p.coords.longitude.toFixed(3), lat: +p.coords.latitude.toFixed(4), lon: +p.coords.longitude.toFixed(4), sectors: [] }); },
+    () => { $("locate").textContent = "Location blocked"; }
+  );
+});
+
+// --- boot ---
+syncControls();
+load();
+setInterval(load, 10 * 60 * 1000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) load(); });
+</script>
+</body>
+</html>

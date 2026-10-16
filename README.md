@@ -8,6 +8,6 @@ Wind checker for kitesurfing, wing foiling, windsurfing and sailing.
 - Tap the compass in a beach's forecast to mark the directions that work there
 - Tide icon: water level and rising/falling arrow, with the next high and low (modelled, not official tide tables)
 
-Data: wind and tide from [Open-Meteo](https://open-meteo.com), beaches from [OpenStreetMap](https://www.openstreetmap.org) via the Overpass API, map tiles from CARTO. No API keys.
+Data: wind and tide from [Open-Meteo](https://open-meteo.com), beaches from [OpenStreetMap](https://www.openstreetmap.org) via the Overpass API, map tiles from OpenStreetMap. No API keys.
 
-Live at https://wallyclewett.github.io/AirVibes/ — on iPhone open in Safari, Share → Add to Home Screen.
+Live at https://wallyclewett.github.io/airvibes/ — on iPhone open in Safari, Share → Add to Home Screen.

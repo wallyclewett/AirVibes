@@ -12,7 +12,7 @@ async function fetchBeaches() {
   for (const host of HOSTS) {
     try {
       const r = await fetch(host, { method: "POST", body: "data=" + encodeURIComponent(QUERY),
-        headers: { "Content-Type": "application/x-www-form-urlencoded", "User-Agent": "AirVibes beach list builder (github.com/wallyclewett/AirVibes)" } });
+        headers: { "Content-Type": "application/x-www-form-urlencoded", "User-Agent": "AirVibes beach list builder (github.com/wallyclewett/airvibes)" } });
       if (!r.ok) throw new Error(host + " returned " + r.status);
       return (await r.json()).elements;
     } catch (e) { console.error(e.message); }

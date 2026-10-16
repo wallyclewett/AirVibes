@@ -9,4 +9,4 @@ Wind checker for kitesurfing, wing foiling, windsurfing and sailing.
 
 Data: wind from [Open-Meteo](https://open-meteo.com), beaches from [OpenStreetMap](https://www.openstreetmap.org) via the Overpass API, map tiles from CARTO. No API keys.
 
-Live at https://wallyclewett.github.io/airvibes/ — on iPhone open in Safari, Share → Add to Home Screen.
+Live at https://wallyclewett.github.io/AirVibes/ — on iPhone open in Safari, Share → Add to Home Screen.

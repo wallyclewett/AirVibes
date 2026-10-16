@@ -522,7 +522,7 @@ $("locate").addEventListener("click", () => { $("spots").close(); locate(); });
 
 // --- map ---
 const OVERPASS = ["https://overpass-api.de/api/interpreter", "https://overpass.kumi.systems/api/interpreter"];
-const RADIUS_KM = 50, MAX_BEACHES = 25, MIN_GAP_KM = 2.5;
+const RADIUS_KM = 50, VIEW_KM = 10, MAX_BEACHES = 40, MIN_GAP_KM = 2.5;
 const map = L.map("map", { zoomControl: false, attributionControl: true }).setView([-26.5, 134], 4);
 L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
   maxZoom: 19, className: "basetiles",
@@ -533,7 +533,7 @@ let area = null;        // { lat, lon }
 let beaches = [];       // { id, name, lat, lon, dist, speed, gust, deg }
 let selected = null;
 let layer = L.layerGroup().addTo(map);
-let ring = null, me = null;
+let me = null;
 
 function km(aLat, aLon, bLat, bLon) {
   const r = Math.PI / 180, dLat = (bLat - aLat) * r, dLon = (bLon - aLon) * r;
@@ -559,9 +559,8 @@ function locate() {
 }
 
 function focusArea(lat, lon) {
-  if (ring) ring.remove();
-  ring = L.circle([lat, lon], { radius: RADIUS_KM * 1000, color: "#3fc1cf", weight: 1, fillOpacity: 0.04, interactive: false }).addTo(map);
-  map.flyToBounds(ring.getBounds(), { duration: 1.2, paddingBottomRight: [0, 120] });
+  // Zoom to a ~10 km radius but load beaches out to RADIUS_KM so panning around is instant.
+  map.flyToBounds(L.latLng(lat, lon).toBounds(VIEW_KM * 2000), { duration: 1.2, paddingBottomRight: [0, 120] });
   loadArea(lat, lon);
 }
 
@@ -569,6 +568,16 @@ async function findBeaches(lat, lon) {
   const key = "beaches:" + lat.toFixed(1) + "," + lon.toFixed(1);
   const cached = store.get(key, null);
   if (cached && Date.now() - cached.at < 7 * 864e5) return cached.list;
+  // Primary: the beach list GitHub Actions builds into this site. Fallback: live Overpass.
+  try {
+    if (!allBeaches) {
+      const r = await fetch("beaches.json", { cache: "no-cache" });
+      if (!r.ok) throw new Error("beaches.json " + r.status);
+      allBeaches = (await r.json()).beaches;
+    }
+    return pickBeaches(allBeaches.map(([name, bLat, bLon]) => ({ id: "b:" + name + "@" + bLat + "," + bLon, name, lat: bLat, lon: bLon, dist: km(lat, lon, bLat, bLon) }))
+      .filter(b => b.dist <= RADIUS_KM));
+  } catch (e) { console.warn("Beach list unavailable, trying live lookup", e); }
   const q = `[out:json][timeout:25];nwr["natural"="beach"]["name"](around:${RADIUS_KM * 1000},${lat},${lon});out center tags;`;
   let els = null, lastErr;
   for (const host of OVERPASS) {
@@ -580,20 +589,24 @@ async function findBeaches(lat, lon) {
     } catch (e) { lastErr = e; }
   }
   if (!els) throw lastErr;
+  const list = pickBeaches(els.filter(el => (el.lat ?? el.center?.lat) != null).map(el => {
+    const bLat = +(el.lat ?? el.center.lat).toFixed(4), bLon = +(el.lon ?? el.center.lon).toFixed(4);
+    return { id: "b:" + el.tags.name + "@" + bLat + "," + bLon, name: el.tags.name, lat: bLat, lon: bLon, dist: km(lat, lon, bLat, bLon) };
+  }));
+  store.set(key, { at: Date.now(), list });
+  return list;
+}
+
+let allBeaches = null;
+// Nearest copy of each name, then the closest beaches that sit at least MIN_GAP_KM apart.
+function pickBeaches(cands) {
   const byName = new Map();
-  for (const el of els) {
-    const bLat = el.lat ?? el.center?.lat, bLon = el.lon ?? el.center?.lon;
-    if (bLat == null) continue;
-    const b = { id: "osm:" + el.type[0] + el.id, name: el.tags.name, lat: +bLat.toFixed(4), lon: +bLon.toFixed(4), dist: km(lat, lon, bLat, bLon) };
-    const prev = byName.get(b.name);
-    if (!prev || b.dist < prev.dist) byName.set(b.name, b);
-  }
+  for (const b of cands) { const prev = byName.get(b.name); if (!prev || b.dist < prev.dist) byName.set(b.name, b); }
   const list = [];
   for (const b of [...byName.values()].sort((a, z) => a.dist - z.dist)) {
     if (list.length >= MAX_BEACHES) break;
     if (list.every(o => km(o.lat, o.lon, b.lat, b.lon) >= MIN_GAP_KM)) list.push(b);
   }
-  store.set(key, { at: Date.now(), list });
   return list;
 }
 

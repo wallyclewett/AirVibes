@@ -1,0 +1,24 @@
+name: Probe BOM FTP
+on:
+  push:
+    branches: [probe]
+permissions:
+  contents: write
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          mkdir -p probe
+          curl -sS --max-time 60 ftp://ftp.bom.gov.au/anon/gen/fwo/ > probe/listing.txt 2>&1 || true
+          grep -E "ID[A-Z]60(9|8)" probe/listing.txt | head -60 > probe/obs-files.txt || true
+          for f in IDQ60920.xml IDQ60910.json IDQ60801.html; do
+            curl -sS --max-time 60 "ftp://ftp.bom.gov.au/anon/gen/fwo/$f" -o "probe/$f" 2>> probe/errors.txt || true
+          done
+          ls -la probe > probe/sizes.txt
+          head -c 6000 probe/IDQ60920.xml > probe/IDQ60920.head.xml 2>/dev/null || true
+          rm -f probe/IDQ60920.xml probe/IDQ60801.html probe/IDQ60910.json
+          git config user.name "github-actions[bot]"
+          git config user.email "41898+github-actions[bot]@users.noreply.github.com"
+          git add probe && git commit -m "probe results" && git push

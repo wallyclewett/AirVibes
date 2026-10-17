@@ -634,7 +634,10 @@ $("locate").addEventListener("click", () => { $("spots").close(); locate(); });
 // --- map ---
 const OVERPASS = ["https://overpass-api.de/api/interpreter", "https://overpass.kumi.systems/api/interpreter"];
 const RADIUS_KM = 50, VIEW_KM = 10, MAX_BEACHES = 40, MIN_GAP_KM = 2.5;
-const map = L.map("map", { zoomControl: false, attributionControl: true }).setView([-26.5, 134], 4);
+// No initial view: tiles only start loading once we know where to look.
+const map = L.map("map", { zoomControl: false, attributionControl: true });
+let mapReady = false;
+map.whenReady(() => { mapReady = true; });
 L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
   maxZoom: 19, className: "basetiles",
   attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
@@ -664,14 +667,25 @@ function locate() {
       me = L.circleMarker([lat, lon], { radius: 7, color: "#fff", weight: 2, fillColor: "#2b7de9", fillOpacity: 1 }).addTo(map);
       focusArea(lat, lon);
     },
-    () => card(`<p class="meta"><b>Location is off.</b> Tap anywhere on the map, or use Search, to check the beaches around that spot.</p>`),
+    () => {
+      const last = store.get("lastArea", null);
+      if (last) {
+        focusArea(last.lat, last.lon);
+        return;
+      }
+      if (!mapReady) map.setView([-26.5, 134], 4);
+      card(`<p class="meta"><b>Location is off.</b> Tap anywhere on the map, or use Search, to check the beaches around that spot.</p>`);
+    },
     { enableHighAccuracy: false, timeout: 10000, maximumAge: 300000 }
   );
 }
 
 function focusArea(lat, lon) {
   // Zoom to a ~10 km radius but load beaches out to RADIUS_KM so panning around is instant.
-  map.flyToBounds(L.latLng(lat, lon).toBounds(VIEW_KM * 2000), { duration: 1.2, paddingBottomRight: [0, 120] });
+  const bounds = L.latLng(lat, lon).toBounds(VIEW_KM * 2000);
+  if (mapReady) map.flyToBounds(bounds, { duration: 1.2, paddingBottomRight: [0, 120] });
+  else map.fitBounds(bounds, { animate: false, paddingBottomRight: [0, 120] });
+  store.set("lastArea", { lat, lon });
   loadArea(lat, lon);
 }
 
@@ -837,6 +851,9 @@ $("locateMap").addEventListener("click", locate);
 // --- boot ---
 syncControls();
 if (location.hash === "#spot" && savedFor(state.current)) openSpot(active); else history.replaceState(null, "", location.pathname);
+// Fetch the beach list and station readings while GPS is still working out where we are.
+fetch("beaches.json").then(r => r.ok ? r.json() : null).then(j => { if (j && !allBeaches) allBeaches = j.beaches; }).catch(() => {});
+loadObs();
 locate();
 setInterval(() => { if (!$("detail").hidden) load(); else if (area) loadArea(area.lat, area.lon); }, 10 * 60 * 1000);
 document.addEventListener("visibilitychange", () => { if (!document.hidden && !$("detail").hidden) load(); });

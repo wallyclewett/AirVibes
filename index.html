@@ -179,9 +179,9 @@ html, body { height: 100%; }
     <h1 id="spotName">Loading…</h1>
   </header>
 
-  <section class="panel readout" aria-label="Current wind">
+  <section class="panel readout" aria-label="Forecast wind now">
     <div>
-      <div class="label">Wind now</div>
+      <div class="label">Forecast now</div>
       <div class="big num"><span id="speed">--</span><small id="unitLbl">kn</small></div>
       <div class="sub">
         <div><span class="label">Gusts</span><span class="v num" id="gust">--</span></div>
@@ -326,7 +326,7 @@ async function load() {
     data = await r.json();
     render();
     showTide($("tide"), s.lat, s.lon, () => spot() === s);
-    $("status").textContent = "Updated " + new Date().toLocaleTimeString("en-AU", { hour: "numeric", minute: "2-digit" }) + " · Open-Meteo";
+    $("status").textContent = "Updated " + new Date().toLocaleTimeString("en-AU", { hour: "numeric", minute: "2-digit" }) + " · forecast by Open-Meteo";
     $("status").classList.remove("err");
   } catch (e) {
     $("status").textContent = "Couldn't load the forecast. Check your connection and pull to refresh. (" + e.message + ")";

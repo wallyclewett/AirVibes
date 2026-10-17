@@ -148,6 +148,11 @@ html, body { height: 100%; }
 .wm { display: flex; align-items: center; gap: 2px; height: 28px; padding: 0 8px 0 4px; border-radius: 14px; border: 2px solid var(--panel);
   font: 700 15px/1 var(--display); color: #fff; box-shadow: 0 2px 6px rgb(0 0 0 / .3); white-space: nowrap; width: max-content; }
 .wm.go { background: var(--go); } .wm.maybe { background: var(--maybe); } .wm.nogo { background: #6b7d84; }
+.wm.stn { border-radius: 4px; background: var(--ink); color: var(--panel); border-color: var(--accent); }
+.wm.stn svg path { fill: var(--panel); }
+.meas { display: grid; gap: 2px; grid-column: 1 / -1; }
+.meas b { font: 600 20px/1.1 var(--display); }
+.meas span { color: var(--muted); font-size: 13px; }
 .wm.sel { outline: 3px solid var(--accent); outline-offset: 1px; }
 .wm svg { width: 20px; height: 20px; flex: none; }
 .leaflet-div-icon.wmicon { background: none; border: 0; display: flex; justify-content: center; }
@@ -190,6 +195,7 @@ html, body { height: 100%; }
       </div>
     </div>
     <svg class="compass" id="compass" viewBox="-80 -80 160 160" role="img" aria-label="Wind direction compass. Tap sectors to mark good directions."></svg>
+    <div class="meas" id="meas" hidden></div>
     <div class="tide" id="tide" hidden></div>
   </section>
 
@@ -326,6 +332,7 @@ async function load() {
     data = await r.json();
     render();
     showTide($("tide"), s.lat, s.lon, () => spot() === s);
+    showMeas($("meas"), s.lat, s.lon, () => spot() === s);
     $("status").textContent = "Updated " + new Date().toLocaleTimeString("en-AU", { hour: "numeric", minute: "2-digit" }) + " · forecast by Open-Meteo";
     $("status").classList.remove("err");
   } catch (e) {
@@ -441,6 +448,40 @@ function drawWindows(hs) {
     return `<div class="win"><b>${dayName(w.from)} ${hourName(w.from)}–${end}</b>
       <span>${fmt(Math.min(...sp)) === fmt(Math.max(...sp)) ? fmt(Math.min(...sp)) : fmt(Math.min(...sp)) + "–" + fmt(Math.max(...sp))} ${UNIT_LABEL[state.unit]} ${dirName(avgDeg)}</span></div>`;
   }).join("");
+}
+
+// --- measured wind (Bureau of Meteorology stations, published to the data branch every ~10 min) ---
+const OBS_URL = "https://raw.githubusercontent.com/wallyclewett/airvibes/data/obs.json";
+let obsPromise = null, obsAt = 0;
+function loadObs() {
+  if (!obsPromise || Date.now() - obsAt > 5 * 60e3) {
+    obsAt = Date.now();
+    obsPromise = fetch(OBS_URL, { cache: "no-cache" }).then(r => r.ok ? r.json() : null)
+      .then(j => (j?.stations || []).filter(st => Date.now() - Date.parse(st.t) < 2 * 3600e3))
+      .catch(() => []);
+  }
+  return obsPromise;
+}
+async function nearestStation(lat, lon, maxKm = 20) {
+  let best = null, bestD = maxKm;
+  for (const st of await loadObs()) { const d = km(lat, lon, st.lat, st.lon); if (d < bestD) { best = st; bestD = d; } }
+  return best && { ...best, dist: bestD };
+}
+function ago(t) { const m = Math.round((Date.now() - Date.parse(t)) / 60e3); return m < 1 ? "just now" : m < 60 ? m + " min ago" : Math.floor(m / 60) + " h " + (m % 60) + " min ago"; }
+function measLine(st) {
+  const u = UNIT_LABEL[state.unit];
+  return st.spd === 0 || st.deg == null ? `Calm` : `${fmt(st.spd)} ${u}${st.gust != null ? ` gusting ${fmt(st.gust)}` : ""} · from ${dirName(st.deg)}`;
+}
+function measHtml(st, withDist = true) {
+  return `<span class="label">Measured</span><b class="num">${measLine(st)}</b>
+    <span>${withDist ? esc(st.name) + (st.dist != null ? ` · ${st.dist.toFixed(0)} km away` : "") + " · " : ""}${ago(st.t)}</span>`;
+}
+async function showMeas(el, lat, lon, stillCurrent) {
+  const st = await nearestStation(lat, lon);
+  if (!el.isConnected || !stillCurrent()) return;
+  el.hidden = !st;
+  if (st) el.innerHTML = measHtml(st);
+  if (el.id === "cardMeas") document.documentElement.style.setProperty("--sheet-h", $("sheet").offsetHeight + "px");
 }
 
 // --- tide (modelled, from Open-Meteo Marine) ---
@@ -704,6 +745,7 @@ async function loadArea(lat, lon) {
     await windFor(list);
     if (seq !== areaSeq) return;
     beaches = list; paintMarkers(); renderCard();
+    loadStations(lat, lon);
   } catch (e) {
     if (seq === areaSeq) card(`<p class="meta err">Couldn't load beaches (${esc(e.message)}). Check your connection and try again.</p><button class="primary" type="button" onclick="loadArea(${lat},${lon})">Try again</button>`);
   }
@@ -725,10 +767,31 @@ function paintMarkers() {
       .on("click", () => { selected = b; paintMarkers(); renderCard(); })
       .addTo(layer);
   }
+  for (const st of stations) {
+    const icon = L.divIcon({ className: "wmicon", iconSize: [60, 28], iconAnchor: [30, 14],
+      html: `<div class="wm stn${selected === st ? " sel" : ""}" title="${esc(st.name)} (measured)">${st.deg != null && st.spd > 0 ? arrowSvg(st.deg) : ""}${fmt(st.spd)}</div>` });
+    L.marker([st.lat, st.lon], { icon, title: st.name + " (measured)", zIndexOffset: 2000 })
+      .on("click", () => { selected = st; paintMarkers(); renderCard(); })
+      .addTo(layer);
+  }
 }
 
-function windLine(b) { return `${fmt(b.speed)} ${UNIT_LABEL[state.unit]} gusting ${fmt(b.gust)} · from ${dirName(b.deg)}`; }
+function windLine(b) { return `<span class="label">Forecast</span><br>${fmt(b.speed)} ${UNIT_LABEL[state.unit]} gusting ${fmt(b.gust)} · from ${dirName(b.deg)}`; }
+let stations = [];
+async function loadStations(lat, lon) {
+  stations = (await loadObs()).filter(st => km(lat, lon, st.lat, st.lon) <= RADIUS_KM);
+  paintMarkers();
+}
+function renderStationCard(st) {
+  card(`<div class="line"><h2>${esc(st.name)}</h2><span class="chip go" style="background:var(--ink)">Station</span></div>
+    <div class="meas">${measHtml(st, false)}</div>
+    <div class="meta">Bureau of Meteorology weather station. Readings refresh about every 10 minutes.</div>
+    <div class="actions"><button class="iconbtn" type="button" id="closeSel">Close</button></div>`);
+  $("closeSel").onclick = () => { selected = null; paintMarkers(); renderCard(); };
+}
+
 function renderCard() {
+  if (selected?.spd !== undefined) return renderStationCard(selected);
   if (!beaches.length) return;
   const label = { go: "Go", maybe: "Marginal", nogo: "No go" };
   if (selected) {
@@ -737,11 +800,13 @@ function renderCard() {
     card(`<div class="line"><h2>${esc(b.name)}</h2><span class="chip ${v.level}">${label[v.level]}</span></div>
       <div class="wind num">${windLine(b)}</div>
       <div class="meta">${b.dist.toFixed(0)} km away · ${esc(v.why)}</div>
+      <div class="meas" id="cardMeas" hidden></div>
       <div class="tide" id="cardTide" hidden></div>
       <div class="actions"><button class="primary" type="button" id="openSel">Forecast & windows</button><button class="iconbtn" type="button" id="closeSel">Close</button></div>`);
     $("openSel").onclick = () => openSpot({ id: b.id, name: b.name, region: b.dist.toFixed(0) + " km away", lat: b.lat, lon: b.lon, sectors: [] });
     $("closeSel").onclick = () => { selected = null; paintMarkers(); renderCard(); };
     showTide($("cardTide"), b.lat, b.lon, () => selected === b);
+    showMeas($("cardMeas"), b.lat, b.lon, () => selected === b);
     return;
   }
   const order = { go: 0, maybe: 1, nogo: 2 };
@@ -752,9 +817,11 @@ function renderCard() {
   card(`<div class="meta">${goCount ? `${goCount} of ${ranked.length} beaches are Go for ${esc($("sport").selectedOptions[0].text.toLowerCase())}` : `No beaches are Go right now (${ranked.length} checked)`}</div>
     <div class="line"><h2>${esc(best.b.name)}</h2><span class="chip ${best.v.level}">${label[best.v.level]}</span></div>
     <div class="wind num">${windLine(best.b)}</div>
+    <div class="meas" id="cardMeas" hidden></div>
     <div class="tide" id="cardTide" hidden></div>
     <div class="actions"><button class="primary" type="button" id="openBest">Forecast & windows</button></div>`);
   showTide($("cardTide"), best.b.lat, best.b.lon, () => !selected);
+  showMeas($("cardMeas"), best.b.lat, best.b.lon, () => !selected);
   $("openBest").onclick = () => { const b = best.b; openSpot({ id: b.id, name: b.name, region: b.dist.toFixed(0) + " km away", lat: b.lat, lon: b.lon, sectors: [] }); };
 }
 

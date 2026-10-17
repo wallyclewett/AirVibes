@@ -1,0 +1,41 @@
+name: Update station wind
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: [scripts/build-obs.mjs, .github/workflows/obs.yml]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: obs
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Download BOM state observation files
+        run: |
+          mkdir -p bom
+          for s in D N Q S T V W; do
+            curl -sS --retry 2 --max-time 60 "ftp://ftp.bom.gov.au/anon/gen/fwo/ID${s}60920.xml" -o "bom/ID${s}60920.xml" || echo "skip $s"
+          done
+      - run: node scripts/build-obs.mjs bom obs.json
+      # Publish to a separate single-commit branch so main's history and the Pages site stay untouched.
+      - name: Publish to data branch
+        run: |
+          mkdir pub && cp obs.json pub/ && cd pub
+          git init -q -b data
+          git config user.name "github-actions[bot]"
+          git config user.email "41898+github-actions[bot]@users.noreply.github.com"
+          git add obs.json && git commit -qm "Station wind $(date -u +%FT%TZ)"
+          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" data
